@@ -8,6 +8,8 @@ import simplejson
 import numpy as np
 
 rave_env = Environment()
+# This was supposed to be used for being able to query the server for data 
+# about each robot. Still possible, work needed to JSONify nparrays and send over TCP.
 ROBOT_DATA_TYPES = [
     'DOFAccelerationLimits',
     'DOFLimits',
@@ -22,11 +24,17 @@ class RequestHandler(SimpleHTTPRequestHandler):
     global rave_env
 
     def _set_headers(self, response_code=200):
+        """
+        Sets headers for server-side responses. All responses are sent in JSON format.
+        """
         self.send_response(response_code)
         self.send_header("Content-type", "application/json")
         self.end_headers()
 
     def _encode(self, response={}, success=1, error_message='', file=None):
+        """
+        Encode the responses and add success flag, error message, and list of all robots in the collection. File flag was in anticipation of sending a file to client, but better solution will be to encode XML data in JSON and convert back on client-side (akin to adding a server-side robot).
+        """
         response['Success'] = success
         response['Error Message'] = error_message
         response['Robots'] = [r.GetName() for r in rave_env.GetRobots()]
@@ -34,15 +42,25 @@ class RequestHandler(SimpleHTTPRequestHandler):
         return simplejson.dumps(response)
 
     def do_GET(self):
+        """
+        Base query of which robots are in the collection.
+        """
         output = self._encode()
 
         self._set_headers()
         self.wfile.write(output)
 
-    def do_HEAD(self):
-        self._set_headers()
-
     def do_POST(self):
+        """
+        Post request handles multiple types of queries:
+        
+        - [add] Add a new robot to the collection. Requires extra keyword [xml] with data
+        - [set] Modify an existing robot. Requires [robot] name and [set] dict with new parameters.
+        - [remove] Remove an existing robot from collection. Requires [robot] name.
+        - [download] Currently not implemented
+        
+        Asking for any other request will throw an unkown request error. All other mistakes are assumed to be syntax errors (robot names and attributes are case sensitive).
+        """
         response_code = 200
 
         content_length = int(self.headers['Content-Length'])
@@ -72,13 +90,12 @@ class RequestHandler(SimpleHTTPRequestHandler):
             elif post_type == 'download':
                 pass
 
-            else:
-                # Unknown request type
+            else: # Unknown request type
                 response_code = 418
                 response_data = {'success': 0,
                                  'error_message': 'Unknown POST request type'}
 
-        except:
+        except: # Error in syntax
             response_code = 400
             response_data = {'success': 0, 'error_message': 'Bad syntax'}
 
@@ -90,6 +107,7 @@ def start_server(server_class=BaseHTTPServer.HTTPServer, handler_class=RequestHa
     global rave_env
     rave_env.Load(env)
 
+    # addr defaults to 0.0.0.0 to allow binding within docker container to host computer's localhost
     server_address = (addr, port)
     httpd = server_class(server_address, handler_class)
 
